@@ -16,6 +16,7 @@ STATE_FILE="${STATE_FILE:-/var/lib/traffic_state}"
 LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 NOTIFY_ENABLED="${NOTIFY_ENABLED:-false}"
 NOTIFY_DINGTALK_WEBHOOK="${NOTIFY_DINGTALK_WEBHOOK:-}"
+NOTIFY_DINGTALK_SECRET="${NOTIFY_DINGTALK_SECRET:-}"
 
 # 每日用量记录文件（记录每天开始时的累计流量，用于计算昨日增量）
 DAILY_SNAPSHOT_FILE="${DAILY_SNAPSHOT_FILE:-/var/lib/traffic_daily_snapshot}"
@@ -103,6 +104,22 @@ make_progress_bar() {
     echo "$bar"
 }
 
+# ============ 钉钉加签 ============
+dingtalk_get_signed_url() {
+    local webhook="$1"
+    local secret="$2"
+    if [ -z "$secret" ]; then
+        echo "$webhook"
+        return
+    fi
+    local timestamp sign string_to_sign
+    timestamp=$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")
+    string_to_sign=$(printf "%s\n%s" "$timestamp" "$secret")
+    sign=$(printf "%s" "$string_to_sign" | openssl dgst -sha256 -hmac "$secret" -binary 2>/dev/null | base64 | tr -d '\n')
+    sign=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$sign', safe=''))" 2>/dev/null || echo "$sign" | sed 's/+/%2B/g; s/\//%2F/g')
+    echo "${webhook}&timestamp=${timestamp}&sign=${sign}"
+}
+
 # ============ 发送钉钉 Markdown 消息 ============
 send_dingtalk_markdown() {
     local title="$1"
@@ -118,7 +135,11 @@ send_dingtalk_markdown() {
     escaped_content=$(printf '%s' "$content" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null || \
                       printf '%s' "$content" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
 
-    curl -s -X POST "$NOTIFY_DINGTALK_WEBHOOK" \
+    # 加签
+    local signed_url
+    signed_url=$(dingtalk_get_signed_url "$NOTIFY_DINGTALK_WEBHOOK" "$NOTIFY_DINGTALK_SECRET")
+
+    curl -s -X POST "$signed_url" \
         -H "Content-Type: application/json" \
         -d "{
             \"msgtype\": \"markdown\",

@@ -42,6 +42,10 @@ NOTIFY_EMAIL=""
 # 格式: https://oapi.dingtalk.com/robot/send?access_token=xxx
 NOTIFY_DINGTALK_WEBHOOK=""
 
+# 钉钉加签密钥（如果机器人开启了"加签"，在此填入 SEC 开头的密钥）
+# 格式: SECxxxxxxxx
+NOTIFY_DINGTALK_SECRET=""
+
 # ============ 每日流量日报 ============
 # 每日快照文件（用于计算昨日增量，不要手动修改）
 DAILY_SNAPSHOT_FILE="/var/lib/traffic_daily_snapshot"

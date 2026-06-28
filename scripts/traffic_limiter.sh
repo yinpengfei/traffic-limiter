@@ -21,6 +21,7 @@ LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 NOTIFY_ENABLED="${NOTIFY_ENABLED:-false}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 NOTIFY_DINGTALK_WEBHOOK="${NOTIFY_DINGTALK_WEBHOOK:-}"
+NOTIFY_DINGTALK_SECRET="${NOTIFY_DINGTALK_SECRET:-}"
 
 # 日志函数
 log_message() {
@@ -87,6 +88,26 @@ apply_tc_limit() {
     return 1
 }
 
+# 钉钉加签：返回带 timestamp&sign 的完整 URL
+# 钉钉签名算法: timestamp + "\n" + secret → HMAC-SHA256 → Base64 → URL Encode
+dingtalk_get_signed_url() {
+    local webhook="$1"
+    local secret="$2"
+    if [ -z "$secret" ]; then
+        echo "$webhook"
+        return
+    fi
+    local timestamp sign string_to_sign
+    # 毫秒级时间戳（date +%s%3N 可能失败，fallback 到 +%s000）
+    timestamp=$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")
+    string_to_sign=$(printf "%s\n%s" "$timestamp" "$secret")
+    # HMAC-SHA256 → Base64
+    sign=$(printf "%s" "$string_to_sign" | openssl dgst -sha256 -hmac "$secret" -binary 2>/dev/null | base64 | tr -d '\n')
+    # URL Encode（用 python3，大多数云主机已预装）
+    sign=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$sign', safe=''))" 2>/dev/null || echo "$sign" | sed 's/+/%2B/g; s/\//%2F/g')
+    echo "${webhook}&timestamp=${timestamp}&sign=${sign}"
+}
+
 # 通知
 notify() {
     local msg="$1"
@@ -96,7 +117,9 @@ notify() {
     [ -n "$NOTIFY_EMAIL" ] && echo "$msg" | mail -s "流量告警 - $(hostname)" $NOTIFY_EMAIL 2>/dev/null
     
     if [ -n "$NOTIFY_DINGTALK_WEBHOOK" ]; then
-        curl -s -X POST "$NOTIFY_DINGTALK_WEBHOOK" \
+        local signed_url
+        signed_url=$(dingtalk_get_signed_url "$NOTIFY_DINGTALK_WEBHOOK" "$NOTIFY_DINGTALK_SECRET")
+        curl -s -X POST "$signed_url" \
             -H "Content-Type: application/json" \
             -d "{\"msgtype\":\"text\",\"text\":{\"content\":\"$msg\"}}" 2>/dev/null
     fi
