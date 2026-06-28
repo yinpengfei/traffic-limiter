@@ -28,6 +28,9 @@ BASELINE_FILE="/var/lib/traffic_baseline"
 # 状态文件（记录上次重置时间等）
 STATE_FILE="/var/lib/traffic_state"
 
+# 已用流量偏移量文件（用于校准部署前的历史流量）
+USED_OFFSET_FILE="/var/lib/traffic_used_offset"
+
 # 日志文件
 LOG_FILE="/var/log/traffic_limiter.log"
 

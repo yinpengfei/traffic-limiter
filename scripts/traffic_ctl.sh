@@ -23,6 +23,7 @@ WARNING_REMAINING_PERCENT="${WARNING_REMAINING_PERCENT:-10}"
 CRITICAL_REMAINING_GB="${CRITICAL_REMAINING_GB:-10}"
 BASELINE_FILE="${BASELINE_FILE:-/var/lib/traffic_baseline}"
 STATE_FILE="${STATE_FILE:-/var/lib/traffic_state}"
+USED_OFFSET_FILE="${USED_OFFSET_FILE:-/var/lib/traffic_used_offset}"
 LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 
 case "$1" in
@@ -32,30 +33,36 @@ case "$1" in
         ;;
     
     set-used)
-        # 设置已用流量: traffic_ctl set-used 500
+        # 设置已用流量（通过偏移量校准历史流量）
+        # traffic_ctl set-used 175.20
         if [ -z "$2" ]; then
             echo "用法: traffic_ctl set-used <已用GB>"
-            echo "示例: traffic_ctl set-used 500"
+            echo "示例: traffic_ctl set-used 175.20"
+            echo "说明: 用于校准部署前的历史流量，设置后 vnstat 统计+偏移量=实际已用"
             exit 1
         fi
         
-        USED_GB=$2
+        DESIRED_USED=$2
         CURRENT=$(vnstat -i $INTERFACE --json 2>/dev/null | jq '.interfaces[0].traffic.total.rx + .interfaces[0].traffic.total.tx' 2>/dev/null | awk '{printf "%.3f", $1/1024/1024/1024}')
         if [ -z "$CURRENT" ]; then
             echo "错误: 无法获取 vnstat 数据"
             exit 1
         fi
         
-        BASELINE=$(echo "scale=3; $CURRENT - $USED_GB" | bc)
-        if [ $(echo "$BASELINE < 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
-            echo "警告: 计算得到的基准值为负数，设置为 0"
-            BASELINE=0
+        BASELINE=$(cat $BASELINE_FILE 2>/dev/null || echo "0")
+        VNSTAT_USED=$(echo "scale=3; $CURRENT - $BASELINE" | bc)
+        OFFSET=$(echo "scale=3; $DESIRED_USED - $VNSTAT_USED" | bc)
+        if [ $(echo "$OFFSET < 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
+            echo "警告: 计算的偏移量为负（${OFFSET}），设为 0"
+            echo "说明: 期望值小于 vnstat 已统计值，无需偏移"
+            OFFSET=0
         fi
         
-        echo "$BASELINE" > $BASELINE_FILE
-        echo "✓ 已设置已用流量: ${USED_GB}GB"
-        echo "  基准值: ${BASELINE}GB"
-        echo "  当前累计: ${CURRENT}GB"
+        echo "$OFFSET" > $USED_OFFSET_FILE
+        echo "✓ 已校准已用流量: ${DESIRED_USED}GB"
+        echo "  vnstat 已统计: ${VNSTAT_USED}GB"
+        echo "  偏移量: ${OFFSET}GB"
+        echo "  计算公式: ${VNSTAT_USED} + ${OFFSET} = $(echo "scale=3; $VNSTAT_USED + $OFFSET" | bc)GB"
         ;;
     
     set-baseline)
@@ -78,12 +85,14 @@ case "$1" in
         fi
         
         echo "$CURRENT" > $BASELINE_FILE
+        echo "0" > $USED_OFFSET_FILE
         echo "LAST_RESET=$(date +%Y-%m)" > $STATE_FILE
         echo "LAST_RESET_TIMESTAMP=$(date +%s)" >> $STATE_FILE
         
         tc qdisc del dev $INTERFACE root 2>/dev/null
         echo "✓ 已手动重置流量统计"
         echo "  基准值: ${CURRENT}GB"
+        echo "  偏移量: 已清零"
         echo "  重置时间: $(date '+%Y-%m-%d %H:%M:%S')"
         ;;
     

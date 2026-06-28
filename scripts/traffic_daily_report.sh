@@ -41,11 +41,14 @@ get_total_traffic_gb() {
 
 # ============ 获取当期已用流量 (GB) ============
 get_period_used_gb() {
-    local current_total baseline used
+    local current_total baseline used offset
     current_total=$(get_total_traffic_gb)
     baseline=$(cat "$BASELINE_FILE" 2>/dev/null || echo "0")
-    [ "$baseline" = "0" ] && echo "0.000" && return
-    used=$(echo "scale=3; $current_total - $baseline" | bc 2>/dev/null || echo "0")
+    offset=$(cat "${USED_OFFSET_FILE:-/var/lib/traffic_used_offset}" 2>/dev/null || echo "0")
+    if [ $(echo "$baseline == 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
+        echo "$offset" && return
+    fi
+    used=$(echo "scale=3; $current_total - $baseline + $offset" | bc 2>/dev/null || echo "$offset")
     [ "$(echo "$used < 0" | bc 2>/dev/null)" = "1" ] && used="0.000"
     echo "$used"
 }

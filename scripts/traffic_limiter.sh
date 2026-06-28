@@ -17,6 +17,7 @@ WARNING_RATE="${WARNING_RATE:-10mbit}"
 CRITICAL_RATE="${CRITICAL_RATE:-500kbit}"
 BASELINE_FILE="${BASELINE_FILE:-/var/lib/traffic_baseline}"
 STATE_FILE="${STATE_FILE:-/var/lib/traffic_state}"
+USED_OFFSET_FILE="${USED_OFFSET_FILE:-/var/lib/traffic_used_offset}"
 LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 NOTIFY_ENABLED="${NOTIFY_ENABLED:-false}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
@@ -70,6 +71,7 @@ check_reset() {
         echo "$current_total" > "$BASELINE_FILE"
         echo "LAST_RESET=$current_month" > "$STATE_FILE"
         echo "LAST_RESET_TIMESTAMP=$(date +%s)" >> "$STATE_FILE"
+        echo "0" > "$USED_OFFSET_FILE"
         tc qdisc del dev $INTERFACE root 2>/dev/null
         log_message "流量已重置，取消限速"
         notify "流量已重置，开始新的计费周期"
@@ -134,9 +136,10 @@ main() {
     
     local current_total=$(get_total_traffic_gb)
     local baseline=$(cat $BASELINE_FILE 2>/dev/null || echo "0")
-    [ "$baseline" = "0" ] && echo "$current_total" > $BASELINE_FILE && baseline=$current_total
+    [ $(echo "$baseline == 0" | bc 2>/dev/null || echo "0") -eq 1 ] && echo "$current_total" > $BASELINE_FILE && baseline=$current_total
     
-    local used=$(echo "scale=3; $current_total - $baseline" | bc)
+    local offset=$(cat "$USED_OFFSET_FILE" 2>/dev/null || echo "0")
+    local used=$(echo "scale=3; $current_total - $baseline + $offset" | bc)
     [ $(echo "$used < 0" | bc 2>/dev/null || echo "1") -eq 1 ] && used=0
     
     local remaining_gb=$(echo "scale=3; $TOTAL_LIMIT_GB - $used" | bc)

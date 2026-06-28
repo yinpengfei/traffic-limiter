@@ -42,13 +42,14 @@ if [ -z "$CURRENT" ]; then
     CURRENT="0.000"
 fi
 
-# 计算当期用量
-if [ "$BASELINE" = "0" ]; then
-    USED="0.000"
+# 计算当期用量（含历史偏移量）
+OFFSET=$(cat ${USED_OFFSET_FILE:-/var/lib/traffic_used_offset} 2>/dev/null || echo "0")
+if [ $(echo "$BASELINE == 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
+    USED="$OFFSET"
 else
-    USED=$(echo "scale=3; $CURRENT - $BASELINE" | bc 2>/dev/null || echo "0.000")
+    USED=$(echo "scale=3; ($CURRENT - $BASELINE) + $OFFSET" | bc 2>/dev/null || echo "$OFFSET")
     if [ $(echo "$USED < 0" | bc 2>/dev/null || echo "1") -eq 1 ]; then
-        USED="0.000"
+        USED="$OFFSET"
     fi
 fi
 
