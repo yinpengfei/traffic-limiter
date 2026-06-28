@@ -41,3 +41,13 @@ NOTIFY_EMAIL=""
 # 钉钉 Webhook 地址（在钉钉群机器人中获取）
 # 格式: https://oapi.dingtalk.com/robot/send?access_token=xxx
 NOTIFY_DINGTALK_WEBHOOK=""
+
+# ============ 每日流量日报 ============
+# 每日快照文件（用于计算昨日增量，不要手动修改）
+DAILY_SNAPSHOT_FILE="/var/lib/traffic_daily_snapshot"
+
+# 每日日报发送时间（24小时制，默认 01:00）
+# 说明：安装脚本会根据此值自动写入 crontab
+# 格式：HH:MM（例如 01:00、08:30、23:00）
+DAILY_REPORT_HOUR=1
+DAILY_REPORT_MINUTE=0

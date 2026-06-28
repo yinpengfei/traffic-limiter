@@ -185,6 +185,57 @@ case "$1" in
         fi
         ;;
     
+    report)
+        # 立即发送流量日报: traffic_ctl report
+        echo "正在生成并发送流量日报..."
+        bash /usr/local/bin/traffic_daily_report.sh
+        ;;
+
+    report-time)
+        # 查看或修改日报发送时间: traffic_ctl report-time [HH:MM]
+        if [ -z "$2" ]; then
+            # 显示当前 crontab 中的日报任务
+            echo "当前日报 crontab 设置:"
+            crontab -l 2>/dev/null | grep "traffic_daily_report" || echo "  (未设置)"
+            echo ""
+            echo "配置中的时间:"
+            local hour="${DAILY_REPORT_HOUR:-1}"
+            local minute="${DAILY_REPORT_MINUTE:-0}"
+            printf "  每天 %02d:%02d\n" "$hour" "$minute"
+            echo ""
+            echo "提示: 使用 traffic_ctl report-time HH:MM 修改时间"
+        else
+            # 解析 HH:MM
+            local new_hour new_minute
+            new_hour=$(echo "$2" | cut -d: -f1 | sed 's/^0*//')
+            new_minute=$(echo "$2" | cut -d: -f2 | sed 's/^0*//')
+            [ -z "$new_hour" ]   && new_hour=0
+            [ -z "$new_minute" ] && new_minute=0
+
+            if [ "$new_hour" -lt 0 ] || [ "$new_hour" -gt 23 ] || \
+               [ "$new_minute" -lt 0 ] || [ "$new_minute" -gt 59 ]; then
+                echo "错误: 无效的时间格式，请使用 HH:MM（例如 01:00、08:30）"
+                exit 1
+            fi
+
+            # 更新 crontab：先删除旧日报任务，再添加新的
+            (crontab -l 2>/dev/null | grep -v "traffic_daily_report") | crontab -
+            (crontab -l 2>/dev/null; echo "$new_minute $new_hour * * * /usr/local/bin/traffic_daily_report.sh >> /var/log/traffic_limiter.log 2>&1") | crontab -
+
+            # 更新配置文件中的时间
+            if [ -f "$CONFIG_FILE" ]; then
+                sed -i "s/^DAILY_REPORT_HOUR=.*/DAILY_REPORT_HOUR=$new_hour/" "$CONFIG_FILE"
+                sed -i "s/^DAILY_REPORT_MINUTE=.*/DAILY_REPORT_MINUTE=$new_minute/" "$CONFIG_FILE"
+                # 如果配置项不存在则追加
+                grep -q "^DAILY_REPORT_HOUR=" "$CONFIG_FILE" || echo "DAILY_REPORT_HOUR=$new_hour" >> "$CONFIG_FILE"
+                grep -q "^DAILY_REPORT_MINUTE=" "$CONFIG_FILE" || echo "DAILY_REPORT_MINUTE=$new_minute" >> "$CONFIG_FILE"
+            fi
+
+            printf "✓ 日报时间已更新为每天 %02d:%02d\n" "$new_hour" "$new_minute"
+            echo "  crontab: $new_minute $new_hour * * * /usr/local/bin/traffic_daily_report.sh"
+        fi
+        ;;
+
     dingtalk)
         # 钉钉配置向导: traffic_ctl dingtalk
         echo "=========================================="
@@ -239,6 +290,8 @@ case "$1" in
         echo "  unlimit             取消限速"
         echo "  config [edit|show]  查看/编辑配置"
         echo "  notify <消息>       发送测试通知"
+        echo "  report              立即发送流量日报"
+        echo "  report-time [HH:MM] 查看或修改日报发送时间"
         echo "  dingtalk            配置钉钉通知"
         echo "  log [行数]          查看日志（默认 50 行）"
         echo ""

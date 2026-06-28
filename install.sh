@@ -50,11 +50,13 @@ cp scripts/traffic_limiter.sh /usr/local/bin/traffic_limiter.sh
 cp scripts/traffic_query.sh /usr/local/bin/traffic_query.sh
 cp scripts/traffic_ctl.sh /usr/local/bin/traffic_ctl
 cp scripts/traffic_limiter_init.sh /usr/local/bin/traffic_limiter_init.sh
+cp scripts/traffic_daily_report.sh /usr/local/bin/traffic_daily_report.sh
 
 chmod +x /usr/local/bin/traffic_limiter.sh
 chmod +x /usr/local/bin/traffic_query.sh
 chmod +x /usr/local/bin/traffic_ctl
 chmod +x /usr/local/bin/traffic_limiter_init.sh
+chmod +x /usr/local/bin/traffic_daily_report.sh
 echo "✓ 脚本安装完成"
 echo ""
 
@@ -123,18 +125,44 @@ echo ""
 echo "4. 配置钉钉通知（可选）:"
 echo "   traffic_ctl dingtalk"
 echo ""
-echo "5. 查看文档:"
+echo "5. 立即发送一次流量日报测试:"
+echo "   traffic_ctl report"
+echo ""
+echo "6. 修改日报发送时间（默认每天 01:00）:"
+echo "   traffic_ctl report-time 08:00"
+echo ""
+echo "7. 查看文档:"
 echo "   cat docs/README.md"
 echo ""
 
 # 询问是否立即设置 crontab
 read -p "是否现在设置定时任务? (y/n): " SET_CRON
 if [ "$SET_CRON" = "y" ]; then
+    # 流量监控（每10分钟）
     if crontab -l 2>/dev/null | grep -q "traffic_limiter.sh"; then
-        echo "定时任务已存在，跳过"
+        echo "定时监控任务已存在，跳过"
     else
         (crontab -l 2>/dev/null; echo "*/10 * * * * /usr/local/bin/traffic_limiter.sh >> /var/log/traffic_limiter.log 2>&1") | crontab -
-        echo "✓ 定时任务已设置"
+        echo "✓ 流量监控定时任务已设置（每 10 分钟）"
+    fi
+
+    # 每日日报
+    # 读取配置中的日报时间，默认 01:00
+    REPORT_HOUR=1
+    REPORT_MINUTE=0
+    if [ -f /etc/traffic_limiter.conf ]; then
+        _h=$(grep "^DAILY_REPORT_HOUR=" /etc/traffic_limiter.conf | cut -d= -f2)
+        _m=$(grep "^DAILY_REPORT_MINUTE=" /etc/traffic_limiter.conf | cut -d= -f2)
+        [ -n "$_h" ] && REPORT_HOUR=$_h
+        [ -n "$_m" ] && REPORT_MINUTE=$_m
+    fi
+
+    if crontab -l 2>/dev/null | grep -q "traffic_daily_report.sh"; then
+        echo "每日日报任务已存在，跳过"
+    else
+        (crontab -l 2>/dev/null; echo "$REPORT_MINUTE $REPORT_HOUR * * * /usr/local/bin/traffic_daily_report.sh >> /var/log/traffic_limiter.log 2>&1") | crontab -
+        printf "✓ 每日流量日报已设置（每天 %02d:%02d 发送）\n" "$REPORT_HOUR" "$REPORT_MINUTE"
+        echo "  提示: 使用 traffic_ctl report-time HH:MM 修改发送时间"
     fi
 fi
 
