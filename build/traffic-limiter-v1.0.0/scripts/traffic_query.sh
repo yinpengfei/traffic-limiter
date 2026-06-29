@@ -42,14 +42,13 @@ if [ -z "$CURRENT" ]; then
     CURRENT="0.000"
 fi
 
-# 计算当期用量（含历史偏移量）
-OFFSET=$(cat ${USED_OFFSET_FILE:-/var/lib/traffic_used_offset} 2>/dev/null || echo "0")
-if [ $(echo "$BASELINE == 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
-    USED="$OFFSET"
+# 计算当期用量
+if [ "$BASELINE" = "0" ]; then
+    USED="0.000"
 else
-    USED=$(echo "scale=3; ($CURRENT - $BASELINE) + $OFFSET" | bc 2>/dev/null || echo "$OFFSET")
+    USED=$(echo "scale=3; $CURRENT - $BASELINE" | bc 2>/dev/null || echo "0.000")
     if [ $(echo "$USED < 0" | bc 2>/dev/null || echo "1") -eq 1 ]; then
-        USED="$OFFSET"
+        USED="0.000"
     fi
 fi
 
@@ -59,7 +58,7 @@ if [ $(echo "$REMAINING < 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
     REMAINING="0.000"
 fi
 
-PERCENT=$(echo "scale=2; $USED * 100 / $TOTAL_LIMIT_GB" | bc 2>/dev/null || echo "0")
+PERCENT=$(echo "scale=2; $USED / $TOTAL_LIMIT_GB * 100" | bc 2>/dev/null || echo "0")
 REMAINING_PERCENT=$(echo "scale=2; 100 - $PERCENT" | bc 2>/dev/null | cut -d. -f1 || echo "100")
 
 # 确保百分比在合理范围

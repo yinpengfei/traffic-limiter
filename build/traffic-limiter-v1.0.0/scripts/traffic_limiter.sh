@@ -17,12 +17,10 @@ WARNING_RATE="${WARNING_RATE:-10mbit}"
 CRITICAL_RATE="${CRITICAL_RATE:-500kbit}"
 BASELINE_FILE="${BASELINE_FILE:-/var/lib/traffic_baseline}"
 STATE_FILE="${STATE_FILE:-/var/lib/traffic_state}"
-USED_OFFSET_FILE="${USED_OFFSET_FILE:-/var/lib/traffic_used_offset}"
 LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 NOTIFY_ENABLED="${NOTIFY_ENABLED:-false}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 NOTIFY_DINGTALK_WEBHOOK="${NOTIFY_DINGTALK_WEBHOOK:-}"
-NOTIFY_DINGTALK_SECRET="${NOTIFY_DINGTALK_SECRET:-}"
 
 # 日志函数
 log_message() {
@@ -71,7 +69,6 @@ check_reset() {
         echo "$current_total" > "$BASELINE_FILE"
         echo "LAST_RESET=$current_month" > "$STATE_FILE"
         echo "LAST_RESET_TIMESTAMP=$(date +%s)" >> "$STATE_FILE"
-        echo "0" > "$USED_OFFSET_FILE"
         tc qdisc del dev $INTERFACE root 2>/dev/null
         log_message "流量已重置，取消限速"
         notify "流量已重置，开始新的计费周期"
@@ -90,26 +87,6 @@ apply_tc_limit() {
     return 1
 }
 
-# 钉钉加签：返回带 timestamp&sign 的完整 URL
-# 钉钉签名算法: timestamp + "\n" + secret → HMAC-SHA256 → Base64 → URL Encode
-dingtalk_get_signed_url() {
-    local webhook="$1"
-    local secret="$2"
-    if [ -z "$secret" ]; then
-        echo "$webhook"
-        return
-    fi
-    local timestamp sign string_to_sign
-    # 毫秒级时间戳（date +%s%3N 可能失败，fallback 到 +%s000）
-    timestamp=$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")
-    string_to_sign=$(printf "%s\n%s" "$timestamp" "$secret")
-    # HMAC-SHA256 → Base64
-    sign=$(printf "%s" "$string_to_sign" | openssl dgst -sha256 -hmac "$secret" -binary 2>/dev/null | base64 | tr -d '\n')
-    # URL Encode（用 python3，大多数云主机已预装）
-    sign=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$sign', safe=''))" 2>/dev/null || echo "$sign" | sed 's/+/%2B/g; s/\//%2F/g')
-    echo "${webhook}&timestamp=${timestamp}&sign=${sign}"
-}
-
 # 通知
 notify() {
     local msg="$1"
@@ -119,9 +96,7 @@ notify() {
     [ -n "$NOTIFY_EMAIL" ] && echo "$msg" | mail -s "流量告警 - $(hostname)" $NOTIFY_EMAIL 2>/dev/null
     
     if [ -n "$NOTIFY_DINGTALK_WEBHOOK" ]; then
-        local signed_url
-        signed_url=$(dingtalk_get_signed_url "$NOTIFY_DINGTALK_WEBHOOK" "$NOTIFY_DINGTALK_SECRET")
-        curl -s -X POST "$signed_url" \
+        curl -s -X POST "$NOTIFY_DINGTALK_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "{\"msgtype\":\"text\",\"text\":{\"content\":\"$msg\"}}" 2>/dev/null
     fi
@@ -136,16 +111,15 @@ main() {
     
     local current_total=$(get_total_traffic_gb)
     local baseline=$(cat $BASELINE_FILE 2>/dev/null || echo "0")
-    [ $(echo "$baseline == 0" | bc 2>/dev/null || echo "0") -eq 1 ] && echo "$current_total" > $BASELINE_FILE && baseline=$current_total
+    [ "$baseline" = "0" ] && echo "$current_total" > $BASELINE_FILE && baseline=$current_total
     
-    local offset=$(cat "$USED_OFFSET_FILE" 2>/dev/null || echo "0")
-    local used=$(echo "scale=3; $current_total - $baseline + $offset" | bc)
+    local used=$(echo "scale=3; $current_total - $baseline" | bc)
     [ $(echo "$used < 0" | bc 2>/dev/null || echo "1") -eq 1 ] && used=0
     
     local remaining_gb=$(echo "scale=3; $TOTAL_LIMIT_GB - $used" | bc)
     [ $(echo "$remaining_gb < 0" | bc 2>/dev/null || echo "0") -eq 1 ] && remaining_gb=0
     
-    local used_percent=$(echo "scale=2; $used * 100 / $TOTAL_LIMIT_GB" | bc 2>/dev/null || echo "0")
+    local used_percent=$(echo "scale=2; $used / $TOTAL_LIMIT_GB * 100" | bc 2>/dev/null || echo "0")
     local remaining_percent=$(echo "scale=0; 100 - $used_percent" | bc 2>/dev/null | cut -d. -f1 || echo "100")
     [ -z "$remaining_percent" ] && remaining_percent=100
     [ $remaining_percent -lt 0 ] && remaining_percent=0

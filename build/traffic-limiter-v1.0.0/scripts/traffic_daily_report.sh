@@ -16,7 +16,6 @@ STATE_FILE="${STATE_FILE:-/var/lib/traffic_state}"
 LOG_FILE="${LOG_FILE:-/var/log/traffic_limiter.log}"
 NOTIFY_ENABLED="${NOTIFY_ENABLED:-false}"
 NOTIFY_DINGTALK_WEBHOOK="${NOTIFY_DINGTALK_WEBHOOK:-}"
-NOTIFY_DINGTALK_SECRET="${NOTIFY_DINGTALK_SECRET:-}"
 
 # 每日用量记录文件（记录每天开始时的累计流量，用于计算昨日增量）
 DAILY_SNAPSHOT_FILE="${DAILY_SNAPSHOT_FILE:-/var/lib/traffic_daily_snapshot}"
@@ -41,14 +40,11 @@ get_total_traffic_gb() {
 
 # ============ 获取当期已用流量 (GB) ============
 get_period_used_gb() {
-    local current_total baseline used offset
+    local current_total baseline used
     current_total=$(get_total_traffic_gb)
     baseline=$(cat "$BASELINE_FILE" 2>/dev/null || echo "0")
-    offset=$(cat "${USED_OFFSET_FILE:-/var/lib/traffic_used_offset}" 2>/dev/null || echo "0")
-    if [ $(echo "$baseline == 0" | bc 2>/dev/null || echo "0") -eq 1 ]; then
-        echo "$offset" && return
-    fi
-    used=$(echo "scale=3; $current_total - $baseline + $offset" | bc 2>/dev/null || echo "$offset")
+    [ "$baseline" = "0" ] && echo "0.000" && return
+    used=$(echo "scale=3; $current_total - $baseline" | bc 2>/dev/null || echo "0")
     [ "$(echo "$used < 0" | bc 2>/dev/null)" = "1" ] && used="0.000"
     echo "$used"
 }
@@ -107,22 +103,6 @@ make_progress_bar() {
     echo "$bar"
 }
 
-# ============ 钉钉加签 ============
-dingtalk_get_signed_url() {
-    local webhook="$1"
-    local secret="$2"
-    if [ -z "$secret" ]; then
-        echo "$webhook"
-        return
-    fi
-    local timestamp sign string_to_sign
-    timestamp=$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")
-    string_to_sign=$(printf "%s\n%s" "$timestamp" "$secret")
-    sign=$(printf "%s" "$string_to_sign" | openssl dgst -sha256 -hmac "$secret" -binary 2>/dev/null | base64 | tr -d '\n')
-    sign=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$sign', safe=''))" 2>/dev/null || echo "$sign" | sed 's/+/%2B/g; s/\//%2F/g')
-    echo "${webhook}&timestamp=${timestamp}&sign=${sign}"
-}
-
 # ============ 发送钉钉 Markdown 消息 ============
 send_dingtalk_markdown() {
     local title="$1"
@@ -138,11 +118,7 @@ send_dingtalk_markdown() {
     escaped_content=$(printf '%s' "$content" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null || \
                       printf '%s' "$content" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
 
-    # 加签
-    local signed_url
-    signed_url=$(dingtalk_get_signed_url "$NOTIFY_DINGTALK_WEBHOOK" "$NOTIFY_DINGTALK_SECRET")
-
-    curl -s -X POST "$signed_url" \
+    curl -s -X POST "$NOTIFY_DINGTALK_WEBHOOK" \
         -H "Content-Type: application/json" \
         -d "{
             \"msgtype\": \"markdown\",
@@ -163,7 +139,7 @@ main() {
     remaining_gb=$(echo "scale=3; $TOTAL_LIMIT_GB - $period_used" | bc 2>/dev/null || echo "$TOTAL_LIMIT_GB")
     [ "$(echo "$remaining_gb < 0" | bc 2>/dev/null)" = "1" ] && remaining_gb="0.000"
 
-    used_percent=$(echo "scale=1; $period_used * 100 / $TOTAL_LIMIT_GB" | bc 2>/dev/null || echo "0")
+    used_percent=$(echo "scale=1; $period_used / $TOTAL_LIMIT_GB * 100" | bc 2>/dev/null || echo "0")
     remaining_percent=$(echo "scale=1; 100 - $used_percent" | bc 2>/dev/null || echo "100")
     [ "$(echo "$remaining_percent < 0" | bc 2>/dev/null)" = "1" ] && remaining_percent="0.0"
 

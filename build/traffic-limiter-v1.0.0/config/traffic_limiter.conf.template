@@ -1,0 +1,53 @@
+# ============ 基础配置 ============
+# 网卡名称（使用 ip addr 查看）
+INTERFACE="eth0"
+
+# 流量限制（单位：GB）
+TOTAL_LIMIT_GB=1024
+
+# 每月流量重置日（1-28）
+RESET_DAY=1
+
+# ============ 限速阈值 ============
+# 剩余百分比低于此值时，触发警告限速（单位：%，例如 10 表示剩余 10%）
+WARNING_REMAINING_PERCENT=10
+
+# 剩余流量低于此值时，触发严格限速（单位：GB）
+CRITICAL_REMAINING_GB=10
+
+# 警告限速速率（剩余百分比不足时）
+WARNING_RATE="10mbit"
+
+# 严格限速速率（剩余流量不足时）
+CRITICAL_RATE="500kbit"
+
+# ============ 文件路径 ============
+# 基准流量文件（记录计费周期开始时的流量）
+BASELINE_FILE="/var/lib/traffic_baseline"
+
+# 状态文件（记录上次重置时间等）
+STATE_FILE="/var/lib/traffic_state"
+
+# 日志文件
+LOG_FILE="/var/log/traffic_limiter.log"
+
+# ============ 通知配置 ============
+# 是否启用通知（true/false）
+NOTIFY_ENABLED=false
+
+# 邮件通知（需要系统已配置 mail 命令）
+NOTIFY_EMAIL=""
+
+# 钉钉 Webhook 地址（在钉钉群机器人中获取）
+# 格式: https://oapi.dingtalk.com/robot/send?access_token=xxx
+NOTIFY_DINGTALK_WEBHOOK=""
+
+# ============ 每日流量日报 ============
+# 每日快照文件（用于计算昨日增量，不要手动修改）
+DAILY_SNAPSHOT_FILE="/var/lib/traffic_daily_snapshot"
+
+# 每日日报发送时间（24小时制，默认 01:00）
+# 说明：安装脚本会根据此值自动写入 crontab
+# 格式：HH:MM（例如 01:00、08:30、23:00）
+DAILY_REPORT_HOUR=1
+DAILY_REPORT_MINUTE=0
